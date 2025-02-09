@@ -37,33 +37,34 @@ def detect_blinks_and_draw_landmarks(face_roi):
     if results.multi_face_landmarks:
         for face_landmarks in results.multi_face_landmarks:
             # Extract left and right eye landmarks
-            left_eye = np.array([(face_landmarks.landmark[idx].x * face_roi.shape[1], 
-                                  face_landmarks.landmark[idx].y * face_roi.shape[0]) 
-                                 for idx in LEFT_EYE_INDICES])
-            right_eye = np.array([(face_landmarks.landmark[idx].x * face_roi.shape[1], 
-                                   face_landmarks.landmark[idx].y * face_roi.shape[0]) 
-                                  for idx in RIGHT_EYE_INDICES])
+            left_eye = np.array([
+                (face_landmarks.landmark[idx].x * face_roi.shape[1],
+                 face_landmarks.landmark[idx].y * face_roi.shape[0])
+                for idx in LEFT_EYE_INDICES
+            ])
+            right_eye = np.array([
+                (face_landmarks.landmark[idx].x * face_roi.shape[1],
+                 face_landmarks.landmark[idx].y * face_roi.shape[0])
+                for idx in RIGHT_EYE_INDICES
+            ])
 
             # Draw eye landmarks on the face region
             for (x, y) in left_eye:
-                cv2.circle(face_roi, (int(x), int(y)), 2, (0, 255, 0), -1)  # Green dots for left eye
+                cv2.circle(face_roi, (int(x), int(y)), 2, (0, 255, 0), -1)
             for (x, y) in right_eye:
-                cv2.circle(face_roi, (int(x), int(y)), 2, (255, 0, 0), -1)  # Blue dots for right eye
+                cv2.circle(face_roi, (int(x), int(y)), 2, (255, 0, 0), -1)
 
             # Calculate the eye aspect ratio for both eyes
             left_ear = eye_aspect_ratio(left_eye)
             right_ear = eye_aspect_ratio(right_eye)
-
-            # Average the EAR for both eyes
             ear = (left_ear + right_ear) / 2.0
 
-            # Check if the EAR is below the blink threshold
-            if ear < 0.2:  # Adjust this threshold as needed
-                return True  # Blink detected
+            # If EAR is below threshold, consider it a blink
+            if ear < 0.2:
+                return True
 
-    return False  # No blink detected
+    return False
 
-# Main function
 def main():
     # Open the webcam
     cap = cv2.VideoCapture(0)
@@ -90,20 +91,18 @@ def main():
     # Variable to store the current movie frame
     current_movie_frame = None
 
-    while cap.isOpened():
+    while True:
         ret, frame = cap.read()
         if not ret:
             break
 
         # Convert the frame to RGB for face detection
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        # Detect faces in the frame
         results = face_detection.process(frame_rgb)
 
+        # Always show the bounding box + eye landmarks from the camera feed
         if results.detections:
             for detection in results.detections:
-                # Get the bounding box of the face
                 bboxC = detection.location_data.relative_bounding_box
                 ih, iw, _ = frame.shape
                 x = int(bboxC.xmin * iw)
@@ -111,64 +110,44 @@ def main():
                 w = int(bboxC.width * iw)
                 h = int(bboxC.height * ih)
 
-                # Draw the bounding box on the frame
+                # Draw bounding box on the live camera feed
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-                # Crop the face region
+                # Crop the face ROI from the camera feed
                 face_roi = frame[y:y+h, x:x+w]
 
-                # Detect blinks and draw eye landmarks on the face region
+                # Detect blinks in the camera feed
                 blink_detected = detect_blinks_and_draw_landmarks(face_roi)
 
-                if blink_detected:
-                    if not blink_in_progress:
-                        # Blink just started: select a random frame from the movie
-                        random_frame_number = random.randint(0, total_frames - 1)
-                        movie_cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame_number)
-                        ret, current_movie_frame = movie_cap.read()
-                        if not ret:
-                            print("Error: Could not read random frame from the movie.")
-                            continue
-
-                        # Resize the movie frame to match the webcam feed dimensions
+                if blink_detected and not blink_in_progress:
+                    # On blink, pick a random frame from the movie
+                    random_frame_number = random.randint(0, total_frames - 1)
+                    movie_cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame_number)
+                    ret_movie, current_movie_frame = movie_cap.read()
+                    if ret_movie:
+                        # Resize to match webcam dimensions
                         current_movie_frame = cv2.resize(current_movie_frame, (webcam_width, webcam_height))
-                        blink_in_progress = True
-                else:
-                    # Blink ended: reset the flag
+                    else:
+                        print("Error: Could not read random frame from the movie.")
+                    blink_in_progress = True
+                elif not blink_detected:
                     blink_in_progress = False
 
-        # Display the movie frame if a blink is in progress
-        if blink_in_progress:
-            frame = current_movie_frame  # Replace the webcam frame with the movie frame
+        # If we have a valid movie frame from the last blink, show it in a SECOND window
+        # so the main window always shows the live camera feed with overlays.
+        if current_movie_frame is not None:
+            cv2.imshow("Random Movie Frame", current_movie_frame)
+        else:
+            # If no blink has happened or reading failed, close the movie window if open
+            cv2.destroyWindow("Random Movie Frame")
 
-            # Redraw the face rectangle and eye landmarks on the movie frame
-            if results.detections:
-                for detection in results.detections:
-                    # Get the bounding box of the face
-                    bboxC = detection.location_data.relative_bounding_box
-                    ih, iw, _ = frame.shape
-                    x = int(bboxC.xmin * iw)
-                    y = int(bboxC.ymin * ih)
-                    w = int(bboxC.width * iw)
-                    h = int(bboxC.height * ih)
-
-                    # Draw the bounding box on the movie frame
-                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-                    # Crop the face region
-                    face_roi = frame[y:y+h, x:x+w]
-
-                    # Redraw eye landmarks on the movie frame
-                    detect_blinks_and_draw_landmarks(face_roi)
-
-        # Display the frame
-        cv2.imshow("Blink Triggered Movie Frame", frame)
+        # Show the camera feed with bounding box & landmarks
+        cv2.imshow("Camera Feed", frame)
 
         # Exit on 'q' key press
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    # Release the webcam and movie capture objects
     cap.release()
     movie_cap.release()
     cv2.destroyAllWindows()
