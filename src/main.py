@@ -1,7 +1,12 @@
+import os
 import cv2
 import mediapipe as mp
 import numpy as np
 import random
+
+# Suppress MediaPipe and TensorFlow Lite logs
+os.environ['GLOG_minloglevel'] = '2'  # Only show WARNING and ERROR logs
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow logs
 
 # Initialize MediaPipe Face Detection and Face Mesh
 mp_face_detection = mp.solutions.face_detection
@@ -28,6 +33,10 @@ def eye_aspect_ratio(eye_landmarks):
 
 # Function to detect blinks and draw eye landmarks
 def detect_blinks_and_draw_landmarks(frame, face_roi, x, y):
+    # Check if the face region is valid
+    if face_roi is None or face_roi.size == 0:
+        return False
+
     # Convert the face region to RGB
     face_roi_rgb = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
 
@@ -144,17 +153,20 @@ def main():
         if blink_in_progress:
             # Create a copy of the movie frame to avoid modifying the original
             display_frame = current_movie_frame.copy()
+           
+            
+            
 
             # Redraw the face rectangle and eye landmarks on the movie frame
             if results.detections:
                 # Draw the bounding box on the movie frame
                 cv2.rectangle(display_frame, (face_x, face_y), (face_x + face_w, face_y + face_h), (0, 255, 0), 2)
 
-                # Crop the face region from the movie frame
-                face_roi = display_frame[face_y:face_y+face_h, face_x:face_x+face_w]
-
                 # Redraw eye landmarks on the movie frame
                 detect_blinks_and_draw_landmarks(display_frame, face_roi, face_x, face_y)
+
+                 # Crop the face region from the movie frame
+                #face_roi = display_frame[face_y:face_y+face_h, face_x:face_x+face_w]
 
             # Display the modified movie frame
             cv2.imshow("Blink Triggered Movie Frame", display_frame)
