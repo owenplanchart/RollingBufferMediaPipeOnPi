@@ -75,6 +75,10 @@ def main():
     # Open the webcam
     cap = cv2.VideoCapture(0)
 
+    # Get the dimensions of the webcam feed
+    webcam_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    webcam_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
     # Load the movie file
     movie_path = "LookingUpAtTheSun.mp4"
     movie_cap = cv2.VideoCapture(movie_path)
@@ -89,6 +93,9 @@ def main():
 
     # Flag to track if a blink is currently happening
     blink_in_progress = False
+
+    # Variable to store the current movie frame
+    current_movie_frame = None
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -125,20 +132,21 @@ def main():
                         # Blink just started: select a random frame from the movie
                         random_frame_number = random.randint(0, total_frames - 1)
                         movie_cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame_number)
-                        ret, movie_frame = movie_cap.read()
+                        ret, current_movie_frame = movie_cap.read()
                         if not ret:
                             print("Error: Could not read random frame from the movie.")
                             continue
 
-                        # Resize the movie frame to match the face region dimensions
-                        movie_frame = cv2.resize(movie_frame, (w, h))
-
-                        # Overlay the movie frame on the face region
-                        frame[y:y+h, x:x+w] = movie_frame
+                        # Resize the movie frame to match the webcam feed dimensions
+                        current_movie_frame = cv2.resize(current_movie_frame, (webcam_width, webcam_height))
                         blink_in_progress = True
                 else:
                     # Blink ended: reset the flag
                     blink_in_progress = False
+
+        # Display the movie frame if a blink is in progress
+        if blink_in_progress:
+            frame = current_movie_frame  # Replace the webcam frame with the movie frame
 
         # Display the frame
         cv2.imshow("Blink Triggered Movie Frame", frame)
