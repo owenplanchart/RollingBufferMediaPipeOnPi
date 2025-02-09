@@ -13,6 +13,7 @@ face_mesh = mp_face_mesh.FaceMesh(
 
 # Initialize drawing utilities
 mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
 
 # Define indices for the left and right eye landmarks
 LEFT_EYE_INDICES = [362, 385, 387, 263, 373, 380]  # Left eye landmarks
@@ -31,8 +32,8 @@ def eye_aspect_ratio(eye_landmarks):
     ear = (A + B) / (2.0 * C)
     return ear
 
-# Function to detect blinks
-def detect_blinks(frame, face_landmarks):
+# Function to detect blinks and draw eye landmarks
+def detect_blinks(frame):
     # Convert the frame to RGB
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -61,6 +62,12 @@ def detect_blinks(frame, face_landmarks):
                 cv2.putText(frame, "BLINK!", (10, 30), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
+            # Draw the eye landmarks on the frame
+            for (x, y) in left_eye:
+                cv2.circle(frame, (int(x), int(y)), 2, (0, 255, 0), -1)  # Green dots for left eye
+            for (x, y) in right_eye:
+                cv2.circle(frame, (int(x), int(y)), 2, (255, 0, 0), -1)  # Blue dots for right eye
+
     return frame
 
 # Main function to capture video and detect blinks
@@ -73,8 +80,8 @@ def main():
         if not ret:
             break
 
-        # Detect blinks in the frame
-        frame = detect_blinks(frame, face_mesh)
+        # Detect blinks and draw eye landmarks in the frame
+        frame = detect_blinks(frame)
 
         # Display the frame
         cv2.imshow("Blink Detection", frame)
