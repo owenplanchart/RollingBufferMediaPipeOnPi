@@ -3,14 +3,20 @@ import mediapipe as mp
 import numpy as np
 import random
 
-# Initialize MediaPipe Face Mesh
+# Initialize MediaPipe Face Detection and Face Mesh
+mp_face_detection = mp.solutions.face_detection
 mp_face_mesh = mp.solutions.face_mesh
+face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
 face_mesh = mp_face_mesh.FaceMesh(
     max_num_faces=1,  # Detect only one face
     refine_landmarks=True,  # Use refined landmarks for better accuracy
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5,
 )
+
+# Initialize drawing utilities
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
 
 # Define indices for the left and right eye landmarks
 LEFT_EYE_INDICES = [362, 385, 387, 263, 373, 380]  # Left eye landmarks
@@ -24,22 +30,31 @@ def eye_aspect_ratio(eye_landmarks):
     ear = (A + B) / (2.0 * C)
     return ear
 
-# Function to detect blinks
-def detect_blinks(frame):
-    # Convert the frame to RGB
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+# Function to detect blinks and draw landmarks
+def detect_blinks_and_draw_landmarks(face_roi):
+    # Convert the face region to RGB
+    face_roi_rgb = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
 
-    # Process the frame with MediaPipe Face Mesh
-    results = face_mesh.process(frame_rgb)
+    # Process the face region with MediaPipe Face Mesh
+    results = face_mesh.process(face_roi_rgb)
 
     if results.multi_face_landmarks:
         for face_landmarks in results.multi_face_landmarks:
+            # Draw face landmarks on the face region
+            mp_drawing.draw_landmarks(
+                image=face_roi,
+                landmark_list=face_landmarks,
+                connections=mp_face_mesh.FACEMESH_TESSELATION,
+                landmark_drawing_spec=None,
+                connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style(),
+            )
+
             # Extract left and right eye landmarks
-            left_eye = np.array([(face_landmarks.landmark[idx].x * frame.shape[1], 
-                                  face_landmarks.landmark[idx].y * frame.shape[0]) 
+            left_eye = np.array([(face_landmarks.landmark[idx].x * face_roi.shape[1], 
+                                  face_landmarks.landmark[idx].y * face_roi.shape[0]) 
                                  for idx in LEFT_EYE_INDICES])
-            right_eye = np.array([(face_landmarks.landmark[idx].x * frame.shape[1], 
-                                   face_landmarks.landmark[idx].y * frame.shape[0]) 
+            right_eye = np.array([(face_landmarks.landmark[idx].x * face_roi.shape[1], 
+                                   face_landmarks.landmark[idx].y * face_roi.shape[0]) 
                                   for idx in RIGHT_EYE_INDICES])
 
             # Calculate the eye aspect ratio for both eyes
@@ -59,10 +74,6 @@ def detect_blinks(frame):
 def main():
     # Open the webcam
     cap = cv2.VideoCapture(0)
-
-    # Get the dimensions of the webcam feed
-    webcam_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    webcam_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     # Load the movie file
     movie_path = "LookingUpAtTheSun.mp4"
@@ -84,27 +95,50 @@ def main():
         if not ret:
             break
 
-        # Detect blinks in the frame
-        if detect_blinks(frame):
-            if not blink_in_progress:
-                # Blink just started: select a random frame from the movie
-                random_frame_number = random.randint(0, total_frames - 1)
-                movie_cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame_number)
-                ret, movie_frame = movie_cap.read()
-                if not ret:
-                    print("Error: Could not read random frame from the movie.")
-                    continue
+        # Convert the frame to RGB for face detection
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-                # Resize the movie frame to match the webcam feed dimensions
-                movie_frame = cv2.resize(movie_frame, (webcam_width, webcam_height))
-                blink_in_progress = True
-        else:
-            # Blink ended: reset the flag
-            blink_in_progress = False
+        # Detect faces in the frame
+        results = face_detection.process(frame_rgb)
 
-        # Display the movie frame if a blink is in progress
-        if blink_in_progress:
-            frame = movie_frame  # Replace the webcam frame with the resized movie frame
+        if results.detections:
+            for detection in results.detections:
+                # Get the bounding box of the face
+                bboxC = detection.location_data.relative_bounding_box
+                ih, iw, _ = frame.shape
+                x = int(bboxC.xmin * iw)
+                y = int(bboxC.ymin * ih)
+                w = int(bboxC.width * iw)
+                h = int(bboxC.height * ih)
+
+                # Draw the bounding box on the frame
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+                # Crop the face region
+                face_roi = frame[y:y+h, x:x+w]
+
+                # Detect blinks and draw landmarks on the face region
+                blink_detected = detect_blinks_and_draw_landmarks(face_roi)
+
+                if blink_detected:
+                    if not blink_in_progress:
+                        # Blink just started: select a random frame from the movie
+                        random_frame_number = random.randint(0, total_frames - 1)
+                        movie_cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame_number)
+                        ret, movie_frame = movie_cap.read()
+                        if not ret:
+                            print("Error: Could not read random frame from the movie.")
+                            continue
+
+                        # Resize the movie frame to match the face region dimensions
+                        movie_frame = cv2.resize(movie_frame, (w, h))
+
+                        # Overlay the movie frame on the face region
+                        frame[y:y+h, x:x+w] = movie_frame
+                        blink_in_progress = True
+                else:
+                    # Blink ended: reset the flag
+                    blink_in_progress = False
 
         # Display the frame
         cv2.imshow("Blink Triggered Movie Frame", frame)
