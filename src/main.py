@@ -60,6 +60,10 @@ def main():
     # Open the webcam
     cap = cv2.VideoCapture(0)
 
+    # Get the dimensions of the webcam feed
+    webcam_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    webcam_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
     # Load the movie file
     movie_path = "LookingUpAtTheSun.mp4"
     movie_cap = cv2.VideoCapture(movie_path)
@@ -90,6 +94,9 @@ def main():
                 if not ret:
                     print("Error: Could not read random frame from the movie.")
                     continue
+
+                # Resize the movie frame to match the webcam feed dimensions
+                movie_frame = cv2.resize(movie_frame, (webcam_width, webcam_height))
                 blink_in_progress = True
         else:
             # Blink ended: reset the flag
@@ -97,7 +104,7 @@ def main():
 
         # Display the movie frame if a blink is in progress
         if blink_in_progress:
-            frame = movie_frame  # Replace the webcam frame with the movie frame
+            frame = movie_frame  # Replace the webcam frame with the resized movie frame
 
         # Display the frame
         cv2.imshow("Blink Triggered Movie Frame", frame)
