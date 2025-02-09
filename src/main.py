@@ -59,8 +59,8 @@ def detect_blinks(frame):
 
             # Check if the EAR is below the blink threshold
             if ear < 0.2:  # Adjust this threshold as needed
-                cv2.putText(frame, "BLINK!", (10, 30), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                cv2.putText(frame, "BLINK!", (10, 80), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 5)
 
             # Draw the eye landmarks on the frame
             for (x, y) in left_eye:
