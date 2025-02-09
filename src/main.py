@@ -14,10 +14,6 @@ face_mesh = mp_face_mesh.FaceMesh(
     min_tracking_confidence=0.5,
 )
 
-# Initialize drawing utilities
-mp_drawing = mp.solutions.drawing_utils
-mp_drawing_styles = mp.solutions.drawing_styles
-
 # Define indices for the left and right eye landmarks
 LEFT_EYE_INDICES = [362, 385, 387, 263, 373, 380]  # Left eye landmarks
 RIGHT_EYE_INDICES = [33, 160, 158, 133, 153, 144]  # Right eye landmarks
@@ -30,7 +26,7 @@ def eye_aspect_ratio(eye_landmarks):
     ear = (A + B) / (2.0 * C)
     return ear
 
-# Function to detect blinks and draw landmarks
+# Function to detect blinks and draw eye landmarks
 def detect_blinks_and_draw_landmarks(face_roi):
     # Convert the face region to RGB
     face_roi_rgb = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
@@ -40,15 +36,6 @@ def detect_blinks_and_draw_landmarks(face_roi):
 
     if results.multi_face_landmarks:
         for face_landmarks in results.multi_face_landmarks:
-            # Draw face landmarks on the face region
-            mp_drawing.draw_landmarks(
-                image=face_roi,
-                landmark_list=face_landmarks,
-                connections=mp_face_mesh.FACEMESH_TESSELATION,
-                landmark_drawing_spec=None,
-                connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style(),
-            )
-
             # Extract left and right eye landmarks
             left_eye = np.array([(face_landmarks.landmark[idx].x * face_roi.shape[1], 
                                   face_landmarks.landmark[idx].y * face_roi.shape[0]) 
@@ -56,6 +43,12 @@ def detect_blinks_and_draw_landmarks(face_roi):
             right_eye = np.array([(face_landmarks.landmark[idx].x * face_roi.shape[1], 
                                    face_landmarks.landmark[idx].y * face_roi.shape[0]) 
                                   for idx in RIGHT_EYE_INDICES])
+
+            # Draw eye landmarks on the face region
+            for (x, y) in left_eye:
+                cv2.circle(face_roi, (int(x), int(y)), 2, (0, 255, 0), -1)  # Green dots for left eye
+            for (x, y) in right_eye:
+                cv2.circle(face_roi, (int(x), int(y)), 2, (255, 0, 0), -1)  # Blue dots for right eye
 
             # Calculate the eye aspect ratio for both eyes
             left_ear = eye_aspect_ratio(left_eye)
@@ -124,7 +117,7 @@ def main():
                 # Crop the face region
                 face_roi = frame[y:y+h, x:x+w]
 
-                # Detect blinks and draw landmarks on the face region
+                # Detect blinks and draw eye landmarks on the face region
                 blink_detected = detect_blinks_and_draw_landmarks(face_roi)
 
                 if blink_detected:
@@ -147,6 +140,26 @@ def main():
         # Display the movie frame if a blink is in progress
         if blink_in_progress:
             frame = current_movie_frame  # Replace the webcam frame with the movie frame
+
+            # Redraw the face rectangle and eye landmarks on the movie frame
+            if results.detections:
+                for detection in results.detections:
+                    # Get the bounding box of the face
+                    bboxC = detection.location_data.relative_bounding_box
+                    ih, iw, _ = frame.shape
+                    x = int(bboxC.xmin * iw)
+                    y = int(bboxC.ymin * ih)
+                    w = int(bboxC.width * iw)
+                    h = int(bboxC.height * ih)
+
+                    # Draw the bounding box on the movie frame
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+                    # Crop the face region
+                    face_roi = frame[y:y+h, x:x+w]
+
+                    # Redraw eye landmarks on the movie frame
+                    detect_blinks_and_draw_landmarks(face_roi)
 
         # Display the frame
         cv2.imshow("Blink Triggered Movie Frame", frame)
