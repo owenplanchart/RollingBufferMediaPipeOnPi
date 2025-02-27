@@ -1,17 +1,24 @@
-# Ignore the virtual environment
-myEnv/
+# Ignore all mp4 video files
+*.mp4
 
-# Ignore Python cache files
+# Ignore Python bytecode and cache directories
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 
-# Ignore IDE-specific files
-.vscode/
-.idea/
+# Ignore virtual environment directories
+venv/
+env/
+myNewEnv/
 
-# Ignore other unnecessary files
+# Ignore log files and temporary files
 *.log
 *.swp
+*.tmp
+
+# Ignore environment variable files
 *.env
+
+# Ignore editor/IDE specific files
+.vscode/
+.idea/

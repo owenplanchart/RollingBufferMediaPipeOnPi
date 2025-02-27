@@ -1,0 +1,12 @@
+# Camera Commands
+libcamera-hello -t 0 --framerate 30
+libcamera-vid -t 10000 --framerate 30 -o test.h264
+
+# Debugging
+dmesg | grep "link rate"
+vcgencmd get_throttled
+vcgencmd measure_temp
+
+# Media Control
+media-ctl -d /dev/media2 --print-topology
+media-ctl -d /dev/media2 -V "'imx708_wide':0 [fmt:SRGGB10_1X10/1536x864 field:none]"
