@@ -12,9 +12,11 @@ from queue import Queue
 from threading import Thread
 
 
-CAPTURE_FPS = 30
-BUFFER_SECONDS = 2
+CAPTURE_FPS = 60
+CLIP_PLAYBACK_FPS = 30
+BUFFER_SECONDS = 1
 BUFFER_FRAMES = CAPTURE_FPS * BUFFER_SECONDS
+ANALYSIS_MAX_SIZE = (640, 360)
 
 
 class ClipWriter:
@@ -46,7 +48,7 @@ class ClipWriter:
                 writer = cv2.VideoWriter(
                     str(path),
                     cv2.VideoWriter_fourcc(*"mp4v"),
-                    CAPTURE_FPS,
+                    CLIP_PLAYBACK_FPS,
                     (width, height),
                 )
                 if not writer.isOpened():
@@ -93,6 +95,20 @@ def apply_zoom(frame, zoom):
     return cv2.resize(cropped, (width, height), interpolation=cv2.INTER_LINEAR)
 
 
+def resize_for_analysis(frame):
+    """Limit MediaPipe input size while preserving the preview aspect ratio."""
+    height, width = frame.shape[:2]
+    max_width, max_height = ANALYSIS_MAX_SIZE
+    scale = min(1.0, max_width / width, max_height / height)
+    if scale == 1.0:
+        return frame
+    return cv2.resize(
+        frame,
+        (round(width * scale), round(height * scale)),
+        interpolation=cv2.INTER_AREA,
+    )
+
+
 def main():
     # Initialize MediaPipe Face Detection and Face Mesh.
     mp_face_detection = mp.solutions.face_detection
@@ -116,9 +132,9 @@ def main():
     picam2 = Picamera2()
     config = picam2.create_preview_configuration(
         # Picamera2's RGB888 format is stored as BGR bytes, matching OpenCV.
-        main={"size": (640, 480), "format": "RGB888"},
-        # Keep the camera stream at 30 fps; low light may increase gain/noise.
-        controls={"FrameDurationLimits": (33333, 33333)},
+        main={"size": (960, 540), "format": "RGB888"},
+        # Keep the camera stream at 60 fps; low light may increase gain/noise.
+        controls={"FrameDurationLimits": (16666, 16666)},
         transform=Transform(vflip=1))
     picam2.configure(config)
     picam2.start()
@@ -129,7 +145,8 @@ def main():
     prev_time = time.monotonic()
     fps_window_start = prev_time
     fps_frame_count = 0
-    inference_interval = 1
+    # Run landmark inference at roughly 20 fps while preserving 60 fps capture.
+    inference_interval = 3
     frame_number = 0
     ear_history = deque(maxlen=3)
     latest_state = None
@@ -149,7 +166,7 @@ def main():
             camera_frame = picam2.capture_array()
             frame = apply_zoom(camera_frame, zoom)
             ih, iw, _ = frame.shape
-            analysis_frame = zoom_crop(camera_frame, zoom)
+            analysis_frame = resize_for_analysis(zoom_crop(camera_frame, zoom))
             analysis_h, analysis_w = analysis_frame.shape[:2]
             analysis_to_preview_x = iw / analysis_w
             analysis_to_preview_y = ih / analysis_h
@@ -236,7 +253,7 @@ def main():
                     if not blink_latched and clip_frames is None and len(pre_buffer) == BUFFER_FRAMES:
                         blink_latched = True
                         clip_start_pending = True
-                        print("Blink detected; recording the next 2 seconds.", flush=True)
+                        print("Blink detected; recording the next 1 second.", flush=True)
                 else:
                     blink_latched = False
 
