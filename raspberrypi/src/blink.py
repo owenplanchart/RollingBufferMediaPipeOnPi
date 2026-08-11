@@ -6,6 +6,59 @@ import time
 import math
 import numpy as np
 from collections import deque
+from datetime import datetime
+from pathlib import Path
+from queue import Queue
+from threading import Thread
+
+
+CAPTURE_FPS = 30
+BUFFER_SECONDS = 2
+BUFFER_FRAMES = CAPTURE_FPS * BUFFER_SECONDS
+
+
+class ClipWriter:
+    """Writes completed clips away from the camera and inference loop."""
+
+    def __init__(self):
+        self._clips = Queue()
+        self._thread = Thread(target=self._write_clips, daemon=True)
+        self._thread.start()
+
+    def submit(self, path, frames):
+        self._clips.put((path, frames))
+
+    def close(self):
+        self._clips.join()
+        self._clips.put(None)
+        self._thread.join()
+
+    def _write_clips(self):
+        while True:
+            clip = self._clips.get()
+            if clip is None:
+                self._clips.task_done()
+                return
+
+            path, frames = clip
+            try:
+                height, width = frames[0].shape[:2]
+                writer = cv2.VideoWriter(
+                    str(path),
+                    cv2.VideoWriter_fourcc(*"mp4v"),
+                    CAPTURE_FPS,
+                    (width, height),
+                )
+                if not writer.isOpened():
+                    print(f"Could not open video file: {path}", flush=True)
+                    continue
+
+                for frame in frames:
+                    writer.write(frame)
+                writer.release()
+                print(f"Saved blink clip: {path}", flush=True)
+            finally:
+                self._clips.task_done()
 
 def euclidean_distance(pt1, pt2):
     return math.hypot(pt1[0] - pt2[0], pt1[1] - pt2[1])
@@ -83,6 +136,13 @@ def main():
     zoom = 1.0
     zoom_step = 0.1
     max_zoom = 3.0
+    pre_buffer = deque(maxlen=BUFFER_FRAMES)
+    clip_frames = None
+    post_frames_remaining = 0
+    blink_latched = False
+    clip_directory = Path(__file__).resolve().parents[1] / "clips"
+    clip_directory.mkdir(exist_ok=True)
+    clip_writer = ClipWriter()
 
     try:
         while True:
@@ -95,6 +155,7 @@ def main():
             analysis_to_preview_y = ih / analysis_h
             run_inference = frame_number % inference_interval == 0
             frame_number += 1
+            blink_now = False
 
             if run_inference:
                 image_rgb = cv2.cvtColor(analysis_frame, cv2.COLOR_BGR2RGB)
@@ -156,7 +217,8 @@ def main():
                             ear_avg = (ear_left + ear_right) / 2.0
                             ear_history.append(ear_avg)
                             smoothed_ear = sum(ear_history) / len(ear_history)
-                            display_text = "BLINK" if smoothed_ear < BLINK_THRESHOLD else f"EAR: {smoothed_ear:.2f}"
+                            blink_now = smoothed_ear < BLINK_THRESHOLD
+                            display_text = "BLINK" if blink_now else f"EAR: {smoothed_ear:.2f}"
                             latest_state = {
                                 "left_eye": left_eye_pts_full,
                                 "right_eye": right_eye_pts_full,
@@ -167,6 +229,16 @@ def main():
                                 "text": display_text,
                             }
                             break
+
+            clip_start_pending = False
+            if run_inference:
+                if blink_now:
+                    if not blink_latched and clip_frames is None and len(pre_buffer) == BUFFER_FRAMES:
+                        blink_latched = True
+                        clip_start_pending = True
+                        print("Blink detected; recording the next 2 seconds.", flush=True)
+                else:
+                    blink_latched = False
 
             if latest_state:
                 for pt in latest_state["left_eye"] + latest_state["right_eye"]:
@@ -198,6 +270,23 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             cv2.putText(frame, f"Zoom: {zoom:.1f}x", (10, 65),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            if clip_frames is not None or clip_start_pending:
+                cv2.putText(frame, "REC", (10, 100),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+            # Store the fully annotated preview so saved clips match the window.
+            pre_buffer.append(frame.copy())
+            if clip_start_pending:
+                clip_frames = list(pre_buffer)
+                post_frames_remaining = BUFFER_FRAMES
+            elif clip_frames is not None:
+                clip_frames.append(frame.copy())
+                post_frames_remaining -= 1
+                if post_frames_remaining == 0:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    clip_path = clip_directory / f"blink_{timestamp}.mp4"
+                    clip_writer.submit(clip_path, clip_frames)
+                    clip_frames = None
             
             cv2.imshow("Blink Detection", frame)
             
@@ -213,6 +302,7 @@ def main():
             time.sleep(0.005)
     finally:
         picam2.stop()
+        clip_writer.close()
         cv2.destroyAllWindows()
         print("Camera stopped and windows closed.")
 
