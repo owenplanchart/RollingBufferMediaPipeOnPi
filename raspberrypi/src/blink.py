@@ -19,6 +19,27 @@ def compute_ear(eye_points):
     ear = (vertical1 + vertical2) / (2.0 * horizontal)
     return ear
 
+
+def zoom_crop(frame, zoom):
+    """Return the centre crop used for both preview and analysis."""
+    height, width = frame.shape[:2]
+    crop_width = max(2, int(width / zoom))
+    crop_height = max(2, int(height / zoom))
+    x_start = (width - crop_width) // 2
+    y_start = (height - crop_height) // 2
+    return frame[y_start:y_start + crop_height, x_start:x_start + crop_width]
+
+
+def apply_zoom(frame, zoom):
+    """Centre-crop and resize a frame for the preview window."""
+    if zoom <= 1.0:
+        return frame
+
+    cropped = zoom_crop(frame, zoom)
+    height, width = frame.shape[:2]
+    return cv2.resize(cropped, (width, height), interpolation=cv2.INTER_LINEAR)
+
+
 def main():
     # Initialize MediaPipe Face Detection and Face Mesh.
     mp_face_detection = mp.solutions.face_detection
@@ -36,7 +57,7 @@ def main():
     right_eye_indices = [362, 386, 387, 263, 373, 380]
     
     # Increase threshold for blink detection for higher sensitivity.
-    BLINK_THRESHOLD = 0.25  # Adjusted for more sensitivity
+    BLINK_THRESHOLD = 0.30  # Higher threshold for more sensitive blink detection.
 
     # Initialize Picamera2 with vertical flip.
     picam2 = Picamera2()
@@ -59,16 +80,24 @@ def main():
     frame_number = 0
     ear_history = deque(maxlen=3)
     latest_state = None
+    zoom = 1.0
+    zoom_step = 0.1
+    max_zoom = 3.0
 
     try:
         while True:
-            frame = picam2.capture_array()
+            camera_frame = picam2.capture_array()
+            frame = apply_zoom(camera_frame, zoom)
             ih, iw, _ = frame.shape
+            analysis_frame = zoom_crop(camera_frame, zoom)
+            analysis_h, analysis_w = analysis_frame.shape[:2]
+            analysis_to_preview_x = iw / analysis_w
+            analysis_to_preview_y = ih / analysis_h
             run_inference = frame_number % inference_interval == 0
             frame_number += 1
 
             if run_inference:
-                image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                image_rgb = cv2.cvtColor(analysis_frame, cv2.COLOR_BGR2RGB)
                 detection_results = face_detector.process(image_rgb)
                 latest_state = None
                 if not detection_results.detections:
@@ -76,10 +105,10 @@ def main():
 
                 for detection in detection_results.detections or []:
                     bboxC = detection.location_data.relative_bounding_box
-                    x = max(0, int(bboxC.xmin * iw))
-                    y = max(0, int(bboxC.ymin * ih))
-                    x_end = min(int((bboxC.xmin + bboxC.width) * iw), iw)
-                    y_end = min(int((bboxC.ymin + bboxC.height) * ih), ih)
+                    x = max(0, int(bboxC.xmin * analysis_w))
+                    y = max(0, int(bboxC.ymin * analysis_h))
+                    x_end = min(int((bboxC.xmin + bboxC.width) * analysis_w), analysis_w)
+                    y_end = min(int((bboxC.ymin + bboxC.height) * analysis_h), analysis_h)
 
                     # Ensure ROI stays within frame boundaries.
                     roi_rgb = image_rgb[y:y_end, x:x_end]
@@ -111,8 +140,16 @@ def main():
                             except IndexError:
                                 continue
 
-                            left_eye_pts_full = [(pt[0] + x, pt[1] + y) for pt in left_eye_pts]
-                            right_eye_pts_full = [(pt[0] + x, pt[1] + y) for pt in right_eye_pts]
+                            left_eye_pts_full = [
+                                (int((pt[0] + x) * analysis_to_preview_x),
+                                 int((pt[1] + y) * analysis_to_preview_y))
+                                for pt in left_eye_pts
+                            ]
+                            right_eye_pts_full = [
+                                (int((pt[0] + x) * analysis_to_preview_x),
+                                 int((pt[1] + y) * analysis_to_preview_y))
+                                for pt in right_eye_pts
+                            ]
 
                             ear_left = compute_ear(left_eye_pts_full)
                             ear_right = compute_ear(right_eye_pts_full)
@@ -123,10 +160,10 @@ def main():
                             latest_state = {
                                 "left_eye": left_eye_pts_full,
                                 "right_eye": right_eye_pts_full,
-                                "x": x,
-                                "y": y,
-                                "width": actual_w,
-                                "height": actual_h,
+                                "x": int(x * analysis_to_preview_x),
+                                "y": int(y * analysis_to_preview_y),
+                                "width": int(actual_w * analysis_to_preview_x),
+                                "height": int(actual_h * analysis_to_preview_y),
                                 "text": display_text,
                             }
                             break
@@ -159,10 +196,19 @@ def main():
                 fps_frame_count = 0
             cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(frame, f"Zoom: {zoom:.1f}x", (10, 65),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             
             cv2.imshow("Blink Detection", frame)
             
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord(']'):
+                zoom = min(max_zoom, round(zoom + zoom_step, 1))
+                print(f"Zoom: {zoom:.1f}x", flush=True)
+            elif key == ord('['):
+                zoom = max(1.0, round(zoom - zoom_step, 1))
+                print(f"Zoom: {zoom:.1f}x", flush=True)
+            elif key == ord('q'):
                 break
             time.sleep(0.005)
     finally:
