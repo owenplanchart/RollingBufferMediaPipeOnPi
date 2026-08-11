@@ -40,7 +40,8 @@ def main():
     # Initialize Picamera2 with vertical flip.
     picam2 = Picamera2()
     config = picam2.create_preview_configuration(
-        main={"size": (640, 480)},
+        # Picamera2's RGB888 format is stored as BGR bytes, matching OpenCV.
+        main={"size": (640, 480), "format": "RGB888"},
         transform=Transform(vflip=1))
     picam2.configure(config)
     picam2.start()
@@ -53,12 +54,8 @@ def main():
     try:
         while True:
             frame = picam2.capture_array()
-            if frame.shape[2] == 4:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-            else:
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             ih, iw, _ = frame.shape
-            image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # Ensure this line is executed
+            image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             detection_results = face_detector.process(image_rgb)
 
             display_text = ""
