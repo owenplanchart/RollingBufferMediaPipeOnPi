@@ -76,7 +76,7 @@ def main():
     prev_time = time.monotonic()
     fps_window_start = prev_time
     fps_frame_count = 0
-    inference_interval = 2
+    inference_interval = 1
     frame_number = 0
     ear_history = deque(maxlen=3)
     latest_state = None
