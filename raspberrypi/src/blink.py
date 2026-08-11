@@ -5,6 +5,7 @@ import mediapipe as mp
 import time
 import math
 import numpy as np
+from collections import deque
 
 def euclidean_distance(pt1, pt2):
     return math.hypot(pt1[0] - pt2[0], pt1[1] - pt2[1])
@@ -42,6 +43,8 @@ def main():
     config = picam2.create_preview_configuration(
         # Picamera2's RGB888 format is stored as BGR bytes, matching OpenCV.
         main={"size": (640, 480), "format": "RGB888"},
+        # Keep the camera stream at 30 fps; low light may increase gain/noise.
+        controls={"FrameDurationLimits": (33333, 33333)},
         transform=Transform(vflip=1))
     picam2.configure(config)
     picam2.start()
@@ -49,35 +52,41 @@ def main():
 
     # Create display window.
     cv2.namedWindow("Blink Detection", cv2.WINDOW_NORMAL)
-    prev_time = time.time()
+    prev_time = time.monotonic()
+    fps_window_start = prev_time
+    fps_frame_count = 0
+    inference_interval = 2
+    frame_number = 0
+    ear_history = deque(maxlen=3)
+    latest_state = None
 
     try:
         while True:
             frame = picam2.capture_array()
             ih, iw, _ = frame.shape
-            image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            detection_results = face_detector.process(image_rgb)
+            run_inference = frame_number % inference_interval == 0
+            frame_number += 1
 
-            display_text = ""
-            if detection_results.detections:
-                for detection in detection_results.detections:
+            if run_inference:
+                image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                detection_results = face_detector.process(image_rgb)
+                latest_state = None
+                if not detection_results.detections:
+                    ear_history.clear()
+
+                for detection in detection_results.detections or []:
                     bboxC = detection.location_data.relative_bounding_box
-                    x = int(bboxC.xmin * iw)
-                    y = int(bboxC.ymin * ih)
-                    w = int(bboxC.width * iw)
-                    h = int(bboxC.height * ih)
-                    
+                    x = max(0, int(bboxC.xmin * iw))
+                    y = max(0, int(bboxC.ymin * ih))
+                    x_end = min(int((bboxC.xmin + bboxC.width) * iw), iw)
+                    y_end = min(int((bboxC.ymin + bboxC.height) * ih), ih)
+
                     # Ensure ROI stays within frame boundaries.
-                    x_end = min(x + w, iw)
-                    y_end = min(y + h, ih)
                     roi_rgb = image_rgb[y:y_end, x:x_end]
                     actual_h, actual_w = roi_rgb.shape[:2]
                     if actual_h == 0 or actual_w == 0:
                         continue
-                    
-                    # Draw face bounding box.
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
-                    
+
                     # Pad ROI to square.
                     square_side = max(actual_w, actual_h)
                     square_roi = np.zeros((square_side, square_side, 3), dtype=np.uint8)
@@ -101,36 +110,53 @@ def main():
                                 right_eye_pts = [landmarks[i] for i in right_eye_indices]
                             except IndexError:
                                 continue
-                            
+
                             left_eye_pts_full = [(pt[0] + x, pt[1] + y) for pt in left_eye_pts]
                             right_eye_pts_full = [(pt[0] + x, pt[1] + y) for pt in right_eye_pts]
-                            
-                            for pt in left_eye_pts_full:
-                                cv2.circle(frame, pt, 2, (0, 255, 0), -1)
-                            for pt in right_eye_pts_full:
-                                cv2.circle(frame, pt, 2, (0, 255, 0), -1)
-                            
+
                             ear_left = compute_ear(left_eye_pts_full)
                             ear_right = compute_ear(right_eye_pts_full)
                             ear_avg = (ear_left + ear_right) / 2.0
+                            ear_history.append(ear_avg)
+                            smoothed_ear = sum(ear_history) / len(ear_history)
+                            display_text = "BLINK" if smoothed_ear < BLINK_THRESHOLD else f"EAR: {smoothed_ear:.2f}"
+                            latest_state = {
+                                "left_eye": left_eye_pts_full,
+                                "right_eye": right_eye_pts_full,
+                                "x": x,
+                                "y": y,
+                                "width": actual_w,
+                                "height": actual_h,
+                                "text": display_text,
+                            }
+                            break
 
-                            if ear_avg < BLINK_THRESHOLD:
-                                display_text = "BLINK"
-                            else:
-                                display_text = f"EAR: {ear_avg:.2f}"
-                            
-                            # For bigger text, use a higher font scale and thickness.
-                            font_scale = 2.0
-                            thickness = 3
-                            text_size, _ = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
-                            text_x = x + (w - text_size[0]) // 2
-                            text_y = y - 20 if y - 20 > 20 else y + 20
-                            color = (0, 0, 255) if display_text == "BLINK" else (0, 255, 0)
-                            cv2.putText(frame, display_text, (text_x, text_y),
-                                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
-            current_time = time.time()
+            if latest_state:
+                for pt in latest_state["left_eye"] + latest_state["right_eye"]:
+                    cv2.circle(frame, pt, 2, (0, 255, 0), -1)
+
+                x, y = latest_state["x"], latest_state["y"]
+                w, h = latest_state["width"], latest_state["height"]
+                display_text = latest_state["text"]
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                font_scale = 2.0
+                thickness = 3
+                text_size, _ = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+                text_x = x + (w - text_size[0]) // 2
+                text_y = y - 20 if y - 20 > 20 else y + 20
+                color = (0, 0, 255) if display_text == "BLINK" else (0, 255, 0)
+                cv2.putText(frame, display_text, (text_x, text_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+            current_time = time.monotonic()
             fps = 1 / (current_time - prev_time)
             prev_time = current_time
+            fps_frame_count += 1
+            fps_window_elapsed = current_time - fps_window_start
+            if fps_window_elapsed >= 5:
+                fps = fps_frame_count / fps_window_elapsed
+                print(f"Average FPS: {fps:.1f}", flush=True)
+                fps_window_start = current_time
+                fps_frame_count = 0
             cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             
