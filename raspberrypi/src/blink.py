@@ -8,8 +8,10 @@ import numpy as np
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 from threading import Thread
+from pythonosc.dispatcher import Dispatcher
+from pythonosc.osc_server import ThreadingOSCUDPServer
 
 
 CAPTURE_FPS = 60
@@ -17,6 +19,9 @@ CLIP_PLAYBACK_FPS = 30
 BUFFER_SECONDS = 1
 BUFFER_FRAMES = CAPTURE_FPS * BUFFER_SECONDS
 ANALYSIS_MAX_SIZE = (640, 360)
+OSC_BIND_ADDRESS = "0.0.0.0"
+OSC_PORT = 9993
+OSC_RECORD_ADDRESS = "/recordBlink"
 
 
 class ClipWriter:
@@ -110,6 +115,11 @@ def resize_for_analysis(frame):
 
 
 def main():
+    external_triggers = Queue()
+
+    def queue_external_trigger(address, *args):
+        external_triggers.put(address)
+
     # Initialize MediaPipe Face Detection and Face Mesh.
     mp_face_detection = mp.solutions.face_detection
     mp_face_mesh = mp.solutions.face_mesh
@@ -160,6 +170,18 @@ def main():
     clip_directory = Path(__file__).resolve().parents[1] / "clips"
     clip_directory.mkdir(exist_ok=True)
     clip_writer = ClipWriter()
+    osc_dispatcher = Dispatcher()
+    osc_dispatcher.map(OSC_RECORD_ADDRESS, queue_external_trigger)
+    osc_server = ThreadingOSCUDPServer(
+        (OSC_BIND_ADDRESS, OSC_PORT), osc_dispatcher
+    )
+    osc_thread = Thread(target=osc_server.serve_forever, daemon=True)
+    osc_thread.start()
+    print(
+        f"Listening for OSC {OSC_RECORD_ADDRESS} on "
+        f"{OSC_BIND_ADDRESS}:{OSC_PORT}.",
+        flush=True,
+    )
 
     try:
         while True:
@@ -257,6 +279,29 @@ def main():
                 else:
                     blink_latched = False
 
+            while True:
+                try:
+                    external_triggers.get_nowait()
+                except Empty:
+                    break
+                print("External OSC trigger /recordBlink received.", flush=True)
+                if len(pre_buffer) < BUFFER_FRAMES:
+                    print(
+                        "Ignoring external OSC trigger: pre-buffer is still warming up.",
+                        flush=True,
+                    )
+                elif clip_frames is not None or clip_start_pending:
+                    print(
+                        "Ignoring external OSC trigger: a clip is already being collected.",
+                        flush=True,
+                    )
+                else:
+                    clip_start_pending = True
+                    print(
+                        "External OSC trigger accepted; recording the next 1 second.",
+                        flush=True,
+                    )
+
             if latest_state:
                 for pt in latest_state["left_eye"] + latest_state["right_eye"]:
                     cv2.circle(frame, pt, 2, (0, 255, 0), -1)
@@ -318,6 +363,9 @@ def main():
                 break
             time.sleep(0.005)
     finally:
+        osc_server.shutdown()
+        osc_server.server_close()
+        osc_thread.join()
         picam2.stop()
         clip_writer.close()
         cv2.destroyAllWindows()

@@ -37,6 +37,28 @@ python3 src/blink.py
 
 Press `q` in the preview window to stop the application.
 
+## External OSC trigger
+
+In addition to local MediaPipe blink detection, the application accepts an OSC
+message at `/recordBlink` on UDP port `9993`. For the current installation, send
+the message to the Raspberry Pi at `192.168.1.182`. The sender and Raspberry Pi
+must be on the same network.
+
+The server binds to `0.0.0.0:9993`, rather than to the current Wi-Fi address, so
+it continues listening if the Pi's interface address changes. If that address
+does change, senders must use the Pi's new destination address.
+
+To send a test trigger from another computer (including the Mac Mini), install
+`python-osc` and run:
+
+```bash
+python3 -m pip install python-osc
+python3 -c 'from pythonosc.udp_client import SimpleUDPClient; SimpleUDPClient("192.168.1.182", 9993).send_message("/recordBlink", [])'
+```
+
+The Pi ignores triggers while its one-second pre-buffer is warming up or while
+a clip is already being collected.
+
 ## Controls
 
 - `]`: zoom in by 0.1x
