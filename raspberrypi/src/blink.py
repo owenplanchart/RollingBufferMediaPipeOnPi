@@ -138,20 +138,40 @@ def main():
     # Increase threshold for blink detection for higher sensitivity.
     BLINK_THRESHOLD = 0.30  # Higher threshold for more sensitive blink detection.
 
-    # Initialize Picamera2 with vertical flip.
-    picam2 = Picamera2()
-    config = picam2.create_preview_configuration(
-        # Picamera2's RGB888 format is stored as BGR bytes, matching OpenCV.
-        main={"size": (960, 540), "format": "RGB888"},
-        # Keep the camera stream at 60 fps; low light may increase gain/noise.
-        controls={"FrameDurationLimits": (16666, 16666)},
-        transform=Transform(vflip=1))
-    picam2.configure(config)
-    picam2.start()
-    print("Camera started successfully.")
+    # Both modes keep the camera running for the rolling buffer. The selected
+    # mode determines whether a local blink or an OSC message starts a clip.
+    picam2 = None
 
-    # Create display window.
+    def start_camera():
+        nonlocal picam2
+        if picam2 is not None:
+            return
+        camera = Picamera2()
+        config = camera.create_preview_configuration(
+            # Picamera2's RGB888 format is stored as BGR bytes, matching OpenCV.
+            main={"size": (960, 540), "format": "RGB888"},
+            # Keep the camera stream at 60 fps; low light may increase gain/noise.
+            controls={"FrameDurationLimits": (16666, 16666)},
+            transform=Transform(vflip=1),
+        )
+        camera.configure(config)
+        camera.start()
+        picam2 = camera
+        print("Camera started successfully.", flush=True)
+
+    def stop_camera():
+        nonlocal picam2
+        if picam2 is None:
+            return
+        picam2.stop()
+        picam2.close()
+        picam2 = None
+        print("Camera stopped.", flush=True)
+
+    # Create the camera and preview window once; mode changes do not interrupt
+    # the rolling buffer.
     cv2.namedWindow("Blink Detection", cv2.WINDOW_NORMAL)
+    start_camera()
     prev_time = time.monotonic()
     fps_window_start = prev_time
     fps_frame_count = 0
@@ -182,6 +202,8 @@ def main():
         f"{OSC_BIND_ADDRESS}:{OSC_PORT}.",
         flush=True,
     )
+    mode = "osc"
+    print("OSC trigger mode enabled. Press c for blink trigger mode.", flush=True)
 
     try:
         while True:
@@ -192,7 +214,7 @@ def main():
             analysis_h, analysis_w = analysis_frame.shape[:2]
             analysis_to_preview_x = iw / analysis_w
             analysis_to_preview_y = ih / analysis_h
-            run_inference = frame_number % inference_interval == 0
+            run_inference = mode == "camera" and frame_number % inference_interval == 0
             frame_number += 1
             blink_now = False
 
@@ -285,7 +307,12 @@ def main():
                 except Empty:
                     break
                 print("External OSC trigger /recordBlink received.", flush=True)
-                if len(pre_buffer) < BUFFER_FRAMES:
+                if mode != "osc":
+                    print(
+                        "Ignoring external OSC trigger: blink trigger mode is active.",
+                        flush=True,
+                    )
+                elif len(pre_buffer) < BUFFER_FRAMES:
                     print(
                         "Ignoring external OSC trigger: pre-buffer is still warming up.",
                         flush=True,
@@ -332,8 +359,11 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             cv2.putText(frame, f"Zoom: {zoom:.1f}x", (10, 65),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            mode_text = "OSC trigger mode" if mode == "osc" else "Blink trigger mode"
+            cv2.putText(frame, mode_text, (10, 100),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
             if clip_frames is not None or clip_start_pending:
-                cv2.putText(frame, "REC", (10, 100),
+                cv2.putText(frame, "REC", (10, 135),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
             # Store the fully annotated preview so saved clips match the window.
@@ -359,6 +389,18 @@ def main():
             elif key == ord('['):
                 zoom = max(1.0, round(zoom - zoom_step, 1))
                 print(f"Zoom: {zoom:.1f}x", flush=True)
+            elif key == ord('o'):
+                mode = "osc"
+                latest_state = None
+                ear_history.clear()
+                blink_latched = False
+                print("OSC trigger mode enabled.", flush=True)
+            elif key == ord('c'):
+                mode = "camera"
+                latest_state = None
+                ear_history.clear()
+                blink_latched = False
+                print("Blink trigger mode enabled.", flush=True)
             elif key == ord('q'):
                 break
             time.sleep(0.005)
@@ -366,7 +408,7 @@ def main():
         osc_server.shutdown()
         osc_server.server_close()
         osc_thread.join()
-        picam2.stop()
+        stop_camera()
         clip_writer.close()
         cv2.destroyAllWindows()
         print("Camera stopped and windows closed.")

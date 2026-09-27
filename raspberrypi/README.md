@@ -35,7 +35,10 @@ source .venv/bin/activate
 python3 src/blink.py
 ```
 
-Press `q` in the preview window to stop the application.
+The application always keeps the camera and rolling buffer active. It starts in
+OSC trigger mode: press `o` to record clips only when `/recordBlink` arrives,
+or press `c` to record clips only when the camera detects a blink. The preview
+shows the current mode. Press `q` to stop the application.
 
 ## External OSC trigger
 
@@ -61,6 +64,8 @@ a clip is already being collected.
 
 ## Controls
 
+- `c`: camera blink-trigger mode (OSC messages are ignored)
+- `o`: OSC-trigger mode (local blink detection is disabled)
 - `]`: zoom in by 0.1x
 - `[`: zoom out by 0.1x
 - `q`: quit
