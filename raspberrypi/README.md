@@ -38,7 +38,9 @@ python3 src/blink.py
 The application always keeps the camera and rolling buffer active. It starts in
 OSC trigger mode: press `o` to record clips only when `/recordBlink` arrives,
 or press `c` to record clips only when the camera detects a blink. The preview
-shows the current mode. Press `q` to stop the application.
+shows the current mode. Press `g` to hide or show all overlays while keeping the
+camera view open. The selected overlay setting also applies to recorded clips.
+Press `q` to stop the application.
 
 ## External OSC trigger
 
@@ -66,6 +68,7 @@ a clip is already being collected.
 
 - `c`: camera blink-trigger mode (OSC messages are ignored)
 - `o`: OSC-trigger mode (local blink detection is disabled)
+- `g`: toggle overlays in the camera view and recorded clips
 - `]`: zoom in by 0.1x
 - `[`: zoom out by 0.1x
 - `q`: quit

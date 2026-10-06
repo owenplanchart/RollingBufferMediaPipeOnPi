@@ -22,6 +22,7 @@ ANALYSIS_MAX_SIZE = (640, 360)
 OSC_BIND_ADDRESS = "0.0.0.0"
 OSC_PORT = 9993
 OSC_RECORD_ADDRESS = "/recordBlink"
+PREVIEW_WINDOW = "Blink Detection"
 
 
 class ClipWriter:
@@ -66,6 +67,7 @@ class ClipWriter:
                 print(f"Saved blink clip: {path}", flush=True)
             finally:
                 self._clips.task_done()
+
 
 def euclidean_distance(pt1, pt2):
     return math.hypot(pt1[0] - pt2[0], pt1[1] - pt2[1])
@@ -168,9 +170,9 @@ def main():
         picam2 = None
         print("Camera stopped.", flush=True)
 
-    # Create the camera and preview window once; mode changes do not interrupt
-    # the rolling buffer.
-    cv2.namedWindow("Blink Detection", cv2.WINDOW_NORMAL)
+    # Mode and overlay changes do not interrupt the camera or rolling buffer.
+    overlays_enabled = True
+    cv2.namedWindow(PREVIEW_WINDOW, cv2.WINDOW_NORMAL)
     start_camera()
     prev_time = time.monotonic()
     fps_window_start = prev_time
@@ -203,7 +205,11 @@ def main():
         flush=True,
     )
     mode = "osc"
-    print("OSC trigger mode enabled. Press c for blink trigger mode.", flush=True)
+    print(
+        "OSC trigger mode enabled. Press c for blink trigger mode or g to "
+        "toggle the GUI overlays.",
+        flush=True,
+    )
 
     try:
         while True:
@@ -329,7 +335,7 @@ def main():
                         flush=True,
                     )
 
-            if latest_state:
+            if overlays_enabled and latest_state:
                 for pt in latest_state["left_eye"] + latest_state["right_eye"]:
                     cv2.circle(frame, pt, 2, (0, 255, 0), -1)
 
@@ -355,18 +361,21 @@ def main():
                 print(f"Average FPS: {fps:.1f}", flush=True)
                 fps_window_start = current_time
                 fps_frame_count = 0
-            cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.putText(frame, f"Zoom: {zoom:.1f}x", (10, 65),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            mode_text = "OSC trigger mode" if mode == "osc" else "Blink trigger mode"
-            cv2.putText(frame, mode_text, (10, 100),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-            if clip_frames is not None or clip_start_pending:
-                cv2.putText(frame, "REC", (10, 135),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            if overlays_enabled:
+                cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                cv2.putText(frame, f"Zoom: {zoom:.1f}x", (10, 65),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                mode_text = (
+                    "OSC trigger mode" if mode == "osc" else "Blink trigger mode"
+                )
+                cv2.putText(frame, mode_text, (10, 100),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                if clip_frames is not None or clip_start_pending:
+                    cv2.putText(frame, "REC", (10, 135),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
-            # Store the fully annotated preview so saved clips match the window.
+            # Store exactly what is shown so clips follow the overlay setting.
             pre_buffer.append(frame.copy())
             if clip_start_pending:
                 clip_frames = list(pre_buffer)
@@ -380,9 +389,9 @@ def main():
                     clip_writer.submit(clip_path, clip_frames)
                     clip_frames = None
             
-            cv2.imshow("Blink Detection", frame)
-            
+            cv2.imshow(PREVIEW_WINDOW, frame)
             key = cv2.waitKey(1) & 0xFF
+
             if key == ord(']'):
                 zoom = min(max_zoom, round(zoom + zoom_step, 1))
                 print(f"Zoom: {zoom:.1f}x", flush=True)
@@ -401,6 +410,10 @@ def main():
                 ear_history.clear()
                 blink_latched = False
                 print("Blink trigger mode enabled.", flush=True)
+            elif key == ord('g'):
+                overlays_enabled = not overlays_enabled
+                state = "enabled" if overlays_enabled else "disabled"
+                print(f"GUI overlays {state}.", flush=True)
             elif key == ord('q'):
                 break
             time.sleep(0.005)
