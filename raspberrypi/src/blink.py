@@ -12,6 +12,7 @@ from queue import Empty, Queue
 from threading import Thread
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
+from pythonosc.udp_client import SimpleUDPClient
 
 
 CAPTURE_FPS = 60
@@ -22,6 +23,8 @@ ANALYSIS_MAX_SIZE = (640, 360)
 OSC_BIND_ADDRESS = "0.0.0.0"
 OSC_PORT = 9993
 OSC_RECORD_ADDRESS = "/recordBlink"
+OSC_ACK_PORT = 9992
+OSC_ACK_ADDRESS = "/recordBlinkAck"
 PREVIEW_WINDOW = "Blink Detection"
 
 
@@ -33,8 +36,8 @@ class ClipWriter:
         self._thread = Thread(target=self._write_clips, daemon=True)
         self._thread.start()
 
-    def submit(self, path, frames):
-        self._clips.put((path, frames))
+    def submit(self, path, frames, ack_ip=None):
+        self._clips.put((path, frames, ack_ip))
 
     def close(self):
         self._clips.join()
@@ -48,7 +51,7 @@ class ClipWriter:
                 self._clips.task_done()
                 return
 
-            path, frames = clip
+            path, frames, ack_ip = clip
             try:
                 height, width = frames[0].shape[:2]
                 writer = cv2.VideoWriter(
@@ -64,7 +67,26 @@ class ClipWriter:
                 for frame in frames:
                     writer.write(frame)
                 writer.release()
+                if not path.is_file() or path.stat().st_size == 0:
+                    print(f"Video file was not saved correctly: {path}", flush=True)
+                    continue
+
                 print(f"Saved blink clip: {path}", flush=True)
+                if ack_ip is not None:
+                    try:
+                        ack_client = SimpleUDPClient(ack_ip, OSC_ACK_PORT)
+                        ack_client.send_message(OSC_ACK_ADDRESS, path.name)
+                        print(
+                            f"Sent OSC {OSC_ACK_ADDRESS} to "
+                            f"{ack_ip}:{OSC_ACK_PORT} for {path.name}.",
+                            flush=True,
+                        )
+                    except OSError as error:
+                        print(
+                            f"Could not send OSC acknowledgement to "
+                            f"{ack_ip}:{OSC_ACK_PORT}: {error}",
+                            flush=True,
+                        )
             finally:
                 self._clips.task_done()
 
@@ -119,8 +141,8 @@ def resize_for_analysis(frame):
 def main():
     external_triggers = Queue()
 
-    def queue_external_trigger(address, *args):
-        external_triggers.put(address)
+    def queue_external_trigger(client_address, address, *args):
+        external_triggers.put(client_address[0])
 
     # Initialize MediaPipe Face Detection and Face Mesh.
     mp_face_detection = mp.solutions.face_detection
@@ -187,13 +209,18 @@ def main():
     max_zoom = 3.0
     pre_buffer = deque(maxlen=BUFFER_FRAMES)
     clip_frames = None
+    clip_ack_ip = None
     post_frames_remaining = 0
     blink_latched = False
     clip_directory = Path(__file__).resolve().parents[1] / "clips"
     clip_directory.mkdir(exist_ok=True)
     clip_writer = ClipWriter()
     osc_dispatcher = Dispatcher()
-    osc_dispatcher.map(OSC_RECORD_ADDRESS, queue_external_trigger)
+    osc_dispatcher.map(
+        OSC_RECORD_ADDRESS,
+        queue_external_trigger,
+        needs_reply_address=True,
+    )
     osc_server = ThreadingOSCUDPServer(
         (OSC_BIND_ADDRESS, OSC_PORT), osc_dispatcher
     )
@@ -298,6 +325,7 @@ def main():
                             break
 
             clip_start_pending = False
+            clip_start_ack_ip = None
             if run_inference:
                 if blink_now:
                     if not blink_latched and clip_frames is None and len(pre_buffer) == BUFFER_FRAMES:
@@ -309,7 +337,7 @@ def main():
 
             while True:
                 try:
-                    external_triggers.get_nowait()
+                    trigger_ip = external_triggers.get_nowait()
                 except Empty:
                     break
                 print("External OSC trigger /recordBlink received.", flush=True)
@@ -330,6 +358,7 @@ def main():
                     )
                 else:
                     clip_start_pending = True
+                    clip_start_ack_ip = trigger_ip
                     print(
                         "External OSC trigger accepted; recording the next 1 second.",
                         flush=True,
@@ -379,6 +408,7 @@ def main():
             pre_buffer.append(frame.copy())
             if clip_start_pending:
                 clip_frames = list(pre_buffer)
+                clip_ack_ip = clip_start_ack_ip
                 post_frames_remaining = BUFFER_FRAMES
             elif clip_frames is not None:
                 clip_frames.append(frame.copy())
@@ -386,8 +416,9 @@ def main():
                 if post_frames_remaining == 0:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     clip_path = clip_directory / f"blink_{timestamp}.mp4"
-                    clip_writer.submit(clip_path, clip_frames)
+                    clip_writer.submit(clip_path, clip_frames, clip_ack_ip)
                     clip_frames = None
+                    clip_ack_ip = None
             
             cv2.imshow(PREVIEW_WINDOW, frame)
             key = cv2.waitKey(1) & 0xFF

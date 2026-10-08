@@ -64,6 +64,11 @@ python3 -c 'from pythonosc.udp_client import SimpleUDPClient; SimpleUDPClient("1
 The Pi ignores triggers while its one-second pre-buffer is warming up or while
 a clip is already being collected.
 
+After an externally triggered clip has been saved successfully, the Pi sends
+`/recordBlinkAck` to UDP port `9992` at the IP address that sent the trigger.
+The saved filename is included as the OSC message argument. No acknowledgement
+is sent for an ignored trigger or a clip that could not be saved.
+
 ## Controls
 
 - `c`: camera blink-trigger mode (OSC messages are ignored)
