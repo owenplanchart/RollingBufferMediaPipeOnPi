@@ -46,19 +46,21 @@ Press `q` to stop the application.
 
 In addition to local MediaPipe blink detection, the application accepts an OSC
 message at `/recordBlink` on UDP port `9993`. For the current installation, send
-the message to the Raspberry Pi at `192.168.1.182`. The sender and Raspberry Pi
-must be on the same network.
+the message over the direct Ethernet connection from the Mac Mini at
+`192.168.50.1` to the Raspberry Pi at `192.168.50.2`. Both Ethernet interfaces
+use the `192.168.50.0/24` subnet with no gateway, so Wi-Fi can remain available
+for internet access and other devices.
 
-The server binds to `0.0.0.0:9993`, rather than to the current Wi-Fi address, so
-it continues listening if the Pi's interface address changes. If that address
-does change, senders must use the Pi's new destination address.
+The server binds to `0.0.0.0:9993`, so it accepts OSC triggers arriving through
+Ethernet or Wi-Fi. The direct Ethernet address is preferred for the installation
+because it avoids relying on Wi-Fi for recording triggers.
 
 To send a test trigger from another computer (including the Mac Mini), install
 `python-osc` and run:
 
 ```bash
 python3 -m pip install python-osc
-python3 -c 'from pythonosc.udp_client import SimpleUDPClient; SimpleUDPClient("192.168.1.182", 9993).send_message("/recordBlink", [])'
+python3 -c 'from pythonosc.udp_client import SimpleUDPClient; SimpleUDPClient("192.168.50.2", 9993).send_message("/recordBlink", 1.0)'
 ```
 
 The Pi ignores triggers while its one-second pre-buffer is warming up or while
@@ -66,8 +68,12 @@ a clip is already being collected.
 
 After an externally triggered clip has been saved successfully, the Pi sends
 `/recordBlinkAck` to UDP port `9992` at the IP address that sent the trigger.
-The saved filename is included as the OSC message argument. No acknowledgement
-is sent for an ignored trigger or a clip that could not be saved.
+For the direct connection, this is the Mac Mini at `192.168.50.1:9992`. The
+saved filename is included as the sole OSC message argument. The acknowledgement
+is sent only after the video writer has closed the file and confirmed that it
+exists and is non-empty. No acknowledgement is sent for an ignored trigger or a
+clip that could not be saved. Failure to send the acknowledgement is logged and
+does not stop the rolling-buffer receiver.
 
 ## Controls
 
