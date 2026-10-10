@@ -82,7 +82,18 @@ does not stop the rolling-buffer receiver.
 - `g`: toggle overlays in the camera view and recorded clips
 - `]`: zoom in by 0.1x
 - `[`: zoom out by 0.1x
+- `r`: rotate 90 degrees clockwise (0°, 90°, 180°, 270°, then back to 0°)
 - `q`: quit
+
+Click the preview window to give it keyboard focus before using these controls.
+Rotation applies to the preview, blink detection, and saved clips, relative to
+the existing camera vertical flip. Quarter turns produce a 540x960 portrait
+image without stretching. The preview area automatically switches between
+640x360 landscape and 360x640 portrait to match the image. You can still resize
+the window manually between orientation changes. If a clip is being collected,
+rotation waits until collection finishes. Each applied rotation clears the rolling buffer and
+detection state; triggers are unavailable until the 60-frame buffer refills.
+The rotation angle appears when overlays are enabled and resets to 0° on restart.
 
 ## Blink clips
 
@@ -90,4 +101,8 @@ The camera is configured for 60 fps and the application keeps a 60-frame circula
 
 Saved clips are written to `raspberrypi/clips/` and include the same blink, landmark, FPS, zoom, and recording overlays shown in the preview.
 
-The 960x540 preview and recording stream is reduced to a maximum of 640x360 before MediaPipe analysis, while captured clips retain the higher resolution. In testing, this higher-resolution mode ran below the 60 fps target; use 640x480 if maintaining the closest possible 2x slow-motion rate is more important than output resolution.
+The recording stream is 960x540 in landscape or 540x960 in portrait. MediaPipe
+analysis uses at most 640x360 or 360x640 respectively; resizing the preview
+window does not change the recording resolution. Capture targets 60 fps, but
+actual throughput depends on processing load. The on-screen FPS is an
+instantaneous reading; the log reports a steadier five-second average.

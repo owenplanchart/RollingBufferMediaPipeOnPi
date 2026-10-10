@@ -26,6 +26,7 @@ OSC_RECORD_ADDRESS = "/recordBlink"
 OSC_ACK_PORT = 9992
 OSC_ACK_ADDRESS = "/recordBlinkAck"
 PREVIEW_WINDOW = "Blink Detection"
+PREVIEW_LONG_EDGE = 640
 
 
 class ClipWriter:
@@ -124,10 +125,24 @@ def apply_zoom(frame, zoom):
     return cv2.resize(cropped, (width, height), interpolation=cv2.INTER_LINEAR)
 
 
+def rotate_frame(frame, rotation):
+    """Rotate clockwise in quarter turns relative to the camera configuration."""
+    rotations = {
+        90: cv2.ROTATE_90_CLOCKWISE,
+        180: cv2.ROTATE_180,
+        270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+    }
+    if rotation == 0:
+        return frame
+    return cv2.rotate(frame, rotations[rotation])
+
+
 def resize_for_analysis(frame):
     """Limit MediaPipe input size while preserving the preview aspect ratio."""
     height, width = frame.shape[:2]
     max_width, max_height = ANALYSIS_MAX_SIZE
+    if height > width:
+        max_width, max_height = max_height, max_width
     scale = min(1.0, max_width / width, max_height / height)
     if scale == 1.0:
         return frame
@@ -194,7 +209,8 @@ def main():
 
     # Mode and overlay changes do not interrupt the camera or rolling buffer.
     overlays_enabled = True
-    cv2.namedWindow(PREVIEW_WINDOW, cv2.WINDOW_NORMAL)
+    cv2.namedWindow(PREVIEW_WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+    preview_frame_size = None
     start_camera()
     prev_time = time.monotonic()
     fps_window_start = prev_time
@@ -205,6 +221,8 @@ def main():
     ear_history = deque(maxlen=3)
     latest_state = None
     zoom = 1.0
+    rotation = 0
+    requested_rotation = 0
     zoom_step = 0.1
     max_zoom = 3.0
     pre_buffer = deque(maxlen=BUFFER_FRAMES)
@@ -234,13 +252,26 @@ def main():
     mode = "osc"
     print(
         "OSC trigger mode enabled. Press c for blink trigger mode or g to "
-        "toggle the GUI overlays.",
+        "toggle the GUI overlays. Press r to rotate 90 degrees clockwise.",
         flush=True,
     )
 
     try:
         while True:
-            camera_frame = picam2.capture_array()
+            # Finish collecting an active clip before changing its frame geometry.
+            if requested_rotation != rotation and clip_frames is None:
+                rotation = requested_rotation
+                pre_buffer.clear()
+                latest_state = None
+                ear_history.clear()
+                blink_latched = False
+                frame_number = 0
+                face_mesh.reset()
+                print(
+                    f"Rotation: {rotation} degrees clockwise. Pre-buffer warming up.",
+                    flush=True,
+                )
+            camera_frame = rotate_frame(picam2.capture_array(), rotation)
             frame = apply_zoom(camera_frame, zoom)
             ih, iw, _ = frame.shape
             analysis_frame = resize_for_analysis(zoom_crop(camera_frame, zoom))
@@ -393,7 +424,7 @@ def main():
             if overlays_enabled:
                 cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                cv2.putText(frame, f"Zoom: {zoom:.1f}x", (10, 65),
+                cv2.putText(frame, f"Zoom: {zoom:.1f}x  Rotation: {rotation} deg", (10, 65),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 mode_text = (
                     "OSC trigger mode" if mode == "osc" else "Blink trigger mode"
@@ -421,6 +452,15 @@ def main():
                     clip_ack_ip = None
             
             cv2.imshow(PREVIEW_WINDOW, frame)
+            frame_size = (iw, ih)
+            if frame_size != preview_frame_size:
+                # Resize only on startup or orientation changes, leaving manual
+                # window resizing available between rotations.
+                scale = PREVIEW_LONG_EDGE / max(frame_size)
+                cv2.resizeWindow(
+                    PREVIEW_WINDOW, round(iw * scale), round(ih * scale)
+                )
+                preview_frame_size = frame_size
             key = cv2.waitKey(1) & 0xFF
 
             if key == ord(']'):
@@ -429,6 +469,14 @@ def main():
             elif key == ord('['):
                 zoom = max(1.0, round(zoom - zoom_step, 1))
                 print(f"Zoom: {zoom:.1f}x", flush=True)
+            elif key == ord('r'):
+                requested_rotation = (requested_rotation + 90) % 360
+                if clip_frames is not None:
+                    print(
+                        f"Rotation requested: {requested_rotation} degrees clockwise; "
+                        "waiting for the current clip to finish.",
+                        flush=True,
+                    )
             elif key == ord('o'):
                 mode = "osc"
                 latest_state = None
