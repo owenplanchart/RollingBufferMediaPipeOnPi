@@ -42,6 +42,56 @@ shows the current mode. Press `g` to hide or show all overlays while keeping the
 camera view open. The selected overlay setting also applies to recorded clips.
 Press `q` to stop the application.
 
+## Desktop launcher
+
+After completing Setup, install the desktop and application-menu shortcuts once:
+
+```bash
+cd raspberrypi
+python3 install-desktop.py
+```
+
+Open **Blink Rolling Buffer** from the desktop or application menu. If the desktop
+asks, allow launching or mark the shortcut trusted. Press `q` in the preview
+window to quit. The existing keyboard controls and OSC configuration still apply.
+Only the shortcuts are installed; no application files or dependencies are copied.
+
+The launcher runs the current `src/blink.py` using `.venv/bin/python` beside it.
+Code changes and Git updates take effect the next time you launch the app; no
+rebuild is needed. If you move the project, rerun `install-desktop.py` from the
+new location. To use another environment, set `BLINK_PYTHON` to its absolute
+Python executable path. Additional launcher arguments are forwarded to `blink.py`.
+You can also run `python3 launch.py` directly.
+
+Output is saved in `~/.local/state/blink-rolling-buffer/blink.log` (or under
+`XDG_STATE_HOME` when set). Logs rotate at 2 MiB, keeping three backups.
+Startup failures show a graphical message when `zenity` is available.
+The launcher prevents duplicate launches through either shortcut; manually
+running `src/blink.py` bypasses that lock, so quit any terminal-started instance
+before using the desktop shortcut. Dependency installation remains the explicit
+Setup step above; the launcher does not install or upgrade packages.
+
+To remove the desktop integration, delete the **Blink Rolling Buffer** desktop
+shortcut and `~/.local/share/applications/blink-rolling-buffer.desktop` (or its
+equivalent under `XDG_DATA_HOME`). The project remains runnable from the terminal.
+
+## Next step: launch automatically at startup
+
+Planned, not yet enabled: add a desktop autostart entry in
+`~/.config/autostart/` that runs the existing launcher after graphical login.
+This will reuse the current virtual environment, rotating logs, and duplicate
+launch protection, and continue to pick up source changes without a rebuild.
+
+For unattended startup after powering on the Pi, enable desktop auto-login.
+Test a full reboot to confirm the preview opens and Ethernet OSC triggers and
+acknowledgements work. Add a short startup delay only if testing shows it is
+needed for the desktop or camera to become ready.
+
+Closing the app should leave it closed until the next login or manual launch;
+automatic restart after a crash is a separate future option. Removing the
+autostart entry should disable automatic launching while preserving the desktop
+shortcut.
+
 ## External OSC trigger
 
 In addition to local MediaPipe blink detection, the application accepts an OSC
