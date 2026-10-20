@@ -1,6 +1,6 @@
 # Blink Rolling Buffer
 
-Real-time blink detection for a Raspberry Pi 5 and Camera Module 3 Wide. When a blink is detected, the application saves a slow-motion MP4 clip with the second before and the second after the event.
+Real-time blink detection for a Raspberry Pi 5 and Camera Module 3 Wide. When a blink is detected, the application saves a slow-motion MP4 clip with 1.5 seconds before and 1.5 seconds after the event.
 
 ## Requirements
 
@@ -75,22 +75,22 @@ To remove the desktop integration, delete the **Blink Rolling Buffer** desktop
 shortcut and `~/.local/share/applications/blink-rolling-buffer.desktop` (or its
 equivalent under `XDG_DATA_HOME`). The project remains runnable from the terminal.
 
-## Next step: launch automatically at startup
+## Launch automatically at startup
 
-Planned, not yet enabled: add a desktop autostart entry in
-`~/.config/autostart/` that runs the existing launcher after graphical login.
-This will reuse the current virtual environment, rotating logs, and duplicate
-launch protection, and continue to pick up source changes without a rebuild.
+On this Pi, `~/.config/autostart/blink-rolling-buffer.desktop` runs
+`autostart.py` at graphical login. Desktop auto-login is already enabled.
+The wrapper waits 10 seconds, then runs the existing `launch.py`, reusing the
+virtual environment, rotating logs, and duplicate launch protection.
+The delay starts at desktop login, so total time from power-on also includes
+boot time. Source changes take effect on the next launch without a rebuild.
 
-For unattended startup after powering on the Pi, enable desktop auto-login.
-Test a full reboot to confirm the preview opens and Ethernet OSC triggers and
-acknowledgements work. Add a short startup delay only if testing shows it is
-needed for the desktop or camera to become ready.
+Closing the app leaves it closed until the next login or manual launch.
+To disable automatic launching, remove
+`~/.config/autostart/blink-rolling-buffer.desktop`; the manual desktop shortcut
+will still work. If the project moves, update the autostart entry's `Exec` path.
 
-Closing the app should leave it closed until the next login or manual launch;
-automatic restart after a crash is a separate future option. Removing the
-autostart entry should disable automatic launching while preserving the desktop
-shortcut.
+A full reboot is needed to verify the complete power-on sequence, preview,
+and Ethernet OSC triggers and acknowledgements.
 
 ## External OSC trigger
 
@@ -113,7 +113,7 @@ python3 -m pip install python-osc
 python3 -c 'from pythonosc.udp_client import SimpleUDPClient; SimpleUDPClient("192.168.50.2", 9993).send_message("/recordBlink", 1.0)'
 ```
 
-The Pi ignores triggers while its one-second pre-buffer is warming up or while
+The Pi ignores triggers while its 1.5-second pre-buffer is warming up or while
 a clip is already being collected.
 
 After an externally triggered clip has been saved successfully, the Pi sends
@@ -142,12 +142,12 @@ image without stretching. The preview area automatically switches between
 640x360 landscape and 360x640 portrait to match the image. You can still resize
 the window manually between orientation changes. If a clip is being collected,
 rotation waits until collection finishes. Each applied rotation clears the rolling buffer and
-detection state; triggers are unavailable until the 60-frame buffer refills.
-The rotation angle appears when overlays are enabled and resets to 0° on restart.
+detection state; triggers are unavailable until the 90-frame buffer refills.
+The rotation angle appears when overlays are enabled and defaults to 270° on restart.
 
 ## Blink clips
 
-The camera is configured for 60 fps and the application keeps a 60-frame circular buffer. A blink saves 60 frames before and 60 frames after the event. Clips are encoded at 30 fps, so all 120 captured frames play back as a four-second slow-motion video.
+The camera is configured for 60 fps and the application keeps a 90-frame circular buffer. A trigger saves 90 frames before and 90 frames after the event (3 seconds total at the target capture rate). Clips are encoded at 30 fps, so all 180 captured frames play back as a six-second slow-motion video.
 
 Saved clips are written to `raspberrypi/clips/` and include the same blink, landmark, FPS, zoom, and recording overlays shown in the preview.
 

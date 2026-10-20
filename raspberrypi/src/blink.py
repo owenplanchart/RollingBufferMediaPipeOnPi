@@ -17,8 +17,8 @@ from pythonosc.udp_client import SimpleUDPClient
 
 CAPTURE_FPS = 60
 CLIP_PLAYBACK_FPS = 30
-BUFFER_SECONDS = 1
-BUFFER_FRAMES = CAPTURE_FPS * BUFFER_SECONDS
+BUFFER_SECONDS = 1.5  # Duration on each side of the trigger (3 seconds total).
+BUFFER_FRAMES = round(CAPTURE_FPS * BUFFER_SECONDS)
 ANALYSIS_MAX_SIZE = (640, 360)
 OSC_BIND_ADDRESS = "0.0.0.0"
 OSC_PORT = 9993
@@ -221,8 +221,8 @@ def main():
     ear_history = deque(maxlen=3)
     latest_state = None
     zoom = 1.0
-    rotation = 0
-    requested_rotation = 0
+    rotation = 270
+    requested_rotation = rotation
     zoom_step = 0.1
     max_zoom = 3.0
     pre_buffer = deque(maxlen=BUFFER_FRAMES)
@@ -362,7 +362,7 @@ def main():
                     if not blink_latched and clip_frames is None and len(pre_buffer) == BUFFER_FRAMES:
                         blink_latched = True
                         clip_start_pending = True
-                        print("Blink detected; recording the next 1 second.", flush=True)
+                        print(f"Blink detected; recording the next {BUFFER_SECONDS:g} seconds.", flush=True)
                 else:
                     blink_latched = False
 
@@ -391,7 +391,7 @@ def main():
                     clip_start_pending = True
                     clip_start_ack_ip = trigger_ip
                     print(
-                        "External OSC trigger accepted; recording the next 1 second.",
+                        f"External OSC trigger accepted; recording the next {BUFFER_SECONDS:g} seconds.",
                         flush=True,
                     )
 
