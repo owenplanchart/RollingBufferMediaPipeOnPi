@@ -15,9 +15,10 @@ from pythonosc.osc_server import ThreadingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 
 
-CAPTURE_FPS = 60
+CAPTURE_FPS = 56
 CLIP_PLAYBACK_FPS = 30
-BUFFER_SECONDS = 1.5  # Duration on each side of the trigger (3 seconds total).
+BUFFER_SECONDS = 1.5  # Pre-trigger history at the target capture rate.
+POST_TRIGGER_SECONDS = 4.0
 BUFFER_FRAMES = round(CAPTURE_FPS * BUFFER_SECONDS)
 ANALYSIS_MAX_SIZE = (640, 360)
 OSC_BIND_ADDRESS = "0.0.0.0"
@@ -188,9 +189,9 @@ def main():
         camera = Picamera2()
         config = camera.create_preview_configuration(
             # Picamera2's RGB888 format is stored as BGR bytes, matching OpenCV.
-            main={"size": (960, 540), "format": "RGB888"},
-            # Keep the camera stream at 60 fps; low light may increase gain/noise.
-            controls={"FrameDurationLimits": (16666, 16666)},
+            main={"size": (2304, 1296), "format": "RGB888"},
+            # Target the full 2304x1296 sensor mode at 56 fps.
+            controls={"FrameDurationLimits": (round(1_000_000 / CAPTURE_FPS),) * 2},
             transform=Transform(vflip=1),
         )
         camera.configure(config)
@@ -208,27 +209,27 @@ def main():
         print("Camera stopped.", flush=True)
 
     # Mode and overlay changes do not interrupt the camera or rolling buffer.
-    overlays_enabled = True
+    overlays_enabled = False
     cv2.namedWindow(PREVIEW_WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
     preview_frame_size = None
     start_camera()
     prev_time = time.monotonic()
     fps_window_start = prev_time
     fps_frame_count = 0
-    # Run landmark inference at roughly 20 fps while preserving 60 fps capture.
+    # Run landmark inference at roughly 20 fps while targeting 56 fps capture.
     inference_interval = 3
     frame_number = 0
     ear_history = deque(maxlen=3)
     latest_state = None
     zoom = 1.0
-    rotation = 270
+    rotation = 0
     requested_rotation = rotation
     zoom_step = 0.1
     max_zoom = 3.0
     pre_buffer = deque(maxlen=BUFFER_FRAMES)
     clip_frames = None
     clip_ack_ip = None
-    post_frames_remaining = 0
+    post_capture_deadline = None
     blink_latched = False
     clip_directory = Path(__file__).resolve().parents[1] / "clips"
     clip_directory.mkdir(exist_ok=True)
@@ -362,7 +363,7 @@ def main():
                     if not blink_latched and clip_frames is None and len(pre_buffer) == BUFFER_FRAMES:
                         blink_latched = True
                         clip_start_pending = True
-                        print(f"Blink detected; recording the next {BUFFER_SECONDS:g} seconds.", flush=True)
+                        print(f"Blink detected; recording the next {POST_TRIGGER_SECONDS:g} seconds.", flush=True)
                 else:
                     blink_latched = False
 
@@ -391,7 +392,7 @@ def main():
                     clip_start_pending = True
                     clip_start_ack_ip = trigger_ip
                     print(
-                        f"External OSC trigger accepted; recording the next {BUFFER_SECONDS:g} seconds.",
+                        f"External OSC trigger accepted; recording the next {POST_TRIGGER_SECONDS:g} seconds.",
                         flush=True,
                     )
 
@@ -440,16 +441,16 @@ def main():
             if clip_start_pending:
                 clip_frames = list(pre_buffer)
                 clip_ack_ip = clip_start_ack_ip
-                post_frames_remaining = BUFFER_FRAMES
+                post_capture_deadline = current_time + POST_TRIGGER_SECONDS
             elif clip_frames is not None:
                 clip_frames.append(frame.copy())
-                post_frames_remaining -= 1
-                if post_frames_remaining == 0:
+                if current_time >= post_capture_deadline:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     clip_path = clip_directory / f"blink_{timestamp}.mp4"
                     clip_writer.submit(clip_path, clip_frames, clip_ack_ip)
                     clip_frames = None
                     clip_ack_ip = None
+                    post_capture_deadline = None
             
             cv2.imshow(PREVIEW_WINDOW, frame)
             frame_size = (iw, ih)

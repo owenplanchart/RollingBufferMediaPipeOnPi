@@ -1,6 +1,6 @@
 # Blink Rolling Buffer
 
-Real-time blink detection for a Raspberry Pi 5 and Camera Module 3 Wide. When a blink is detected, the application saves a slow-motion MP4 clip with 1.5 seconds before and 1.5 seconds after the event.
+Real-time blink detection for a Raspberry Pi 5 and Camera Module 3 Wide. When a blink is detected, the application saves a slow-motion MP4 clip with approximately 1.5 seconds before and 4 seconds after the event.
 
 ## Requirements
 
@@ -39,7 +39,8 @@ The application always keeps the camera and rolling buffer active. It starts in
 OSC trigger mode: press `o` to record clips only when `/recordBlink` arrives,
 or press `c` to record clips only when the camera detects a blink. The preview
 shows the current mode. Press `g` to hide or show all overlays while keeping the
-camera view open. The selected overlay setting also applies to recorded clips.
+camera view open. Overlays are disabled by default on startup. The selected
+overlay setting also applies to recorded clips.
 Press `q` to stop the application.
 
 ## Desktop launcher
@@ -137,22 +138,22 @@ does not stop the rolling-buffer receiver.
 
 Click the preview window to give it keyboard focus before using these controls.
 Rotation applies to the preview, blink detection, and saved clips, relative to
-the existing camera vertical flip. Quarter turns produce a 540x960 portrait
+the existing camera vertical flip. Quarter turns produce a 1296x2304 portrait
 image without stretching. The preview area automatically switches between
 640x360 landscape and 360x640 portrait to match the image. You can still resize
 the window manually between orientation changes. If a clip is being collected,
 rotation waits until collection finishes. Each applied rotation clears the rolling buffer and
-detection state; triggers are unavailable until the 90-frame buffer refills.
-The rotation angle appears when overlays are enabled and defaults to 270° on restart.
+detection state; triggers are unavailable until the 84-frame buffer refills.
+The rotation angle appears when overlays are enabled and defaults to 0° on restart.
 
 ## Blink clips
 
-The camera is configured for 60 fps and the application keeps a 90-frame circular buffer. A trigger saves 90 frames before and 90 frames after the event (3 seconds total at the target capture rate). Clips are encoded at 30 fps, so all 180 captured frames play back as a six-second slow-motion video.
+The camera targets 56 fps and the application keeps an 84-frame circular buffer (approximately 1.5 seconds at the target capture rate). A trigger saves that history and continues collecting for 4 seconds of elapsed time after the trigger, even if processing runs below the target frame rate. At 56 fps this produces approximately 308 frames covering 5.5 seconds. Clips are encoded at 30 fps, giving roughly 10.3 seconds of slow-motion playback at the target capture rate. Lower throughput reduces the frame count and playback duration and increases the time covered by the pre-buffer.
 
 Saved clips are written to `raspberrypi/clips/` and include the same blink, landmark, FPS, zoom, and recording overlays shown in the preview.
 
-The recording stream is 960x540 in landscape or 540x960 in portrait. MediaPipe
+The recording stream is 2304x1296 in landscape or 1296x2304 in portrait. MediaPipe
 analysis uses at most 640x360 or 360x640 respectively; resizing the preview
-window does not change the recording resolution. Capture targets 60 fps, but
+window does not change the recording resolution. Capture targets 56 fps, but
 actual throughput depends on processing load. The on-screen FPS is an
 instantaneous reading; the log reports a steadier five-second average.
